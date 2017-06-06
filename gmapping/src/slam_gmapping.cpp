@@ -817,6 +817,8 @@ SlamGMapping::updateMap(const sensor_msgs::LaserScan& scan)
   GMapping::ScanMatcherMap smap(center, xmin_, ymin_, xmax_, ymax_, 
                                 delta_);
 
+  smap=best.map;
+
   ROS_DEBUG("Trajectory tree:");
   for(GMapping::GridSlamProcessor::TNode* n = best.node;
       n;
