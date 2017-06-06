@@ -620,10 +620,20 @@ SlamGMapping::initMapper(const sensor_msgs::LaserScan& scan)
 
   /// @todo Expose setting an initial pose
   GMapping::OrientedPoint initialPose;
-  if(!getOdomPose(initialPose, scan.header.stamp))
-  {
-    ROS_WARN("Unable to determine inital pose of laser! Starting point will be set to zero.");
-    initialPose = GMapping::OrientedPoint(0.0, 0.0, 0.0);
+
+  if (!yaml_.empty()) {
+    // load initial pose from gsp
+    double pose[3];
+    pose[0] = gsp_->origin[0];
+    pose[1] = gsp_->origin[1];
+    pose[2] = gsp_->origin[2];
+    initialPose = GMapping::OrientedPoint(pose[0], pose[1], pose[2]);
+  } else {
+      // TODO goran check if this is conflict with origin = 0 at line 367
+      if (!getOdomPose(initialPose, scan.header.stamp)) {
+          ROS_WARN("Unable to determine inital pose of laser! Starting point will be set to zero.");
+          initialPose = GMapping::OrientedPoint(0.0, 0.0, 0.0);
+      }
   }
 
   gsp_->setMatchingParameters(maxUrange_, maxRange_, sigma_,
