@@ -53,6 +53,7 @@ class SlamGMapping
     ros::Publisher entropy_publisher_;
     ros::Publisher sst_;
     ros::Publisher sstm_;
+    ros::Publisher particlecloud_pub_;
     ros::ServiceServer ss_;
     tf::TransformListener tf_;
     message_filters::Subscriber<sensor_msgs::LaserScan>* scan_filter_sub_;
@@ -131,6 +132,10 @@ class SlamGMapping
     double lasamplerange_;
     double lasamplestep_;
     
+    // Prior map parameters
+    std::string yaml_;
+    int map_trust_;
+
     ros::NodeHandle private_nh_;
     
     unsigned long int seed_;

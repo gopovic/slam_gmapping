@@ -121,6 +121,21 @@ Initial map dimensions and resolution:
 #include <rosbag/bag.h>
 #include <rosbag/view.h>
 #include <boost/foreach.hpp>
+
+// YAML file loading
+#include <map_server/image_loader.h>
+#include <yaml-cpp/yaml.h>
+#include <libgen.h>
+#include <geometry_msgs/PoseArray.h>
+
+// The >> operator disappeared in yaml-cpp 0.5, so this function is
+// added to provide support for code written under the yaml-cpp 0.3 API.
+template<typename T>
+void operator >> (const YAML::Node& node, T& i)
+{
+  i = node.as<T>();
+}
+
 #define foreach BOOST_FOREACH
 
 // compute linear index for given map coords
@@ -250,8 +265,111 @@ void SlamGMapping::init()
   if(!private_nh_.getParam("tf_delay", tf_delay_))
     tf_delay_ = transform_publish_period_;
 
-}
+  // read map YAML (code from map_server)
 
+  if(!private_nh_.getParam("yaml", yaml_))
+    yaml_ = std::string();
+
+  if(!private_nh_.getParam("map_trust", map_trust_))
+    map_trust_ = 5;
+
+  std::string map_name;
+  double resolution;
+  int negate;
+  double occ_threshold;
+  double free_threshold;
+  double origin[3];
+  MapMode mode = TRINARY;
+
+  if (!yaml_.empty()) {
+
+    std::ifstream fin(yaml_.c_str());
+    if (fin.fail()) {
+      ROS_ERROR("Map_server could not open %s.", yaml_.c_str());
+      exit(-1);
+    }
+
+    YAML::Node doc = YAML::Load(fin);
+
+
+    try {
+      doc["resolution"] >> resolution;
+    } catch (YAML::InvalidScalar) {
+      ROS_ERROR("The map does not contain a resolution tag or it is invalid.");
+      exit(-1);
+    }
+    try {
+      doc["negate"] >> negate;
+    } catch (YAML::InvalidScalar) {
+      ROS_ERROR("The map does not contain a negate tag or it is invalid.");
+      exit(-1);
+    }
+    try {
+      doc["occupied_thresh"] >> occ_threshold;
+    } catch (YAML::InvalidScalar) {
+      ROS_ERROR("The map does not contain an occupied_thresh tag or it is invalid.");
+      exit(-1);
+    }
+    try {
+      doc["free_thresh"] >> free_threshold;
+    } catch (YAML::InvalidScalar) {
+      ROS_ERROR("The map does not contain a free_thresh tag or it is invalid.");
+      exit(-1);
+    }
+    try {
+      std::string modeS = "";
+      doc["mode"] >> modeS;
+
+      if (modeS == "trinary")
+        mode = TRINARY;
+      else if (modeS == "scale")
+        mode = SCALE;
+      else if (modeS == "raw")
+        mode = RAW;
+      else {
+        ROS_ERROR("Invalid mode tag \"%s\".", modeS.c_str());
+        exit(-1);
+      }
+    } catch (YAML::Exception) {
+      ROS_DEBUG("The map does not contain a mode tag or it is invalid... assuming Trinary");
+      mode = TRINARY;
+    }
+    try {
+      doc["origin"][0] >> origin[0];
+      doc["origin"][1] >> origin[1];
+      doc["origin"][2] >> origin[2];
+    } catch (YAML::InvalidScalar) {
+      ROS_ERROR("The map does not contain an origin tag or it is invalid.");
+      exit(-1);
+    }
+    try {
+      doc["image"] >> map_name;
+      // TODO: make this path-handling more robust
+      if (map_name.size() == 0) {
+        ROS_ERROR("The image tag cannot be an empty string.");
+        exit(-1);
+      }
+      if (map_name[0] != '/') {
+        char *yaml_name = strdup(yaml_.c_str());
+        map_name = std::string(dirname(yaml_name)) + '/' + map_name;
+        free(yaml_name);
+      }
+
+    } catch (YAML::InvalidScalar) {
+      ROS_ERROR("The map does not contain an image tag or it is invalid.");
+      exit(-1);
+    }
+
+    gsp_->setMapParameters(map_name, resolution, negate, occ_threshold, free_threshold, mode, origin);
+  }
+  else {
+      // empty string signalizes that prior map is not used
+      origin[0] = 0;
+      origin[1] = 0;
+      origin[2] = 0;
+      gsp_->setMapParameters(std::string(), 1, 0, 1, 0, mode, origin);
+  }
+}
 
 void SlamGMapping::startLiveSlam()
 {
@@ -259,6 +377,7 @@ void SlamGMapping::startLiveSlam()
   sst_ = node_.advertise<nav_msgs::OccupancyGrid>("map", 1, true);
   sstm_ = node_.advertise<nav_msgs::MapMetaData>("map_metadata", 1, true);
   ss_ = node_.advertiseService("dynamic_map", &SlamGMapping::mapCallback, this);
+  particlecloud_pub_ = node_.advertise<geometry_msgs::PoseArray>("particlecloud", 2, true);
   scan_filter_sub_ = new message_filters::Subscriber<sensor_msgs::LaserScan>(node_, "scan", 5);
   scan_filter_ = new tf::MessageFilter<sensor_msgs::LaserScan>(*scan_filter_sub_, tf_, odom_frame_, 5);
   scan_filter_->registerCallback(boost::bind(&SlamGMapping::laserCallback, this, _1));
@@ -516,7 +635,7 @@ SlamGMapping::initMapper(const sensor_msgs::LaserScan& scan)
   gsp_->setUpdatePeriod(temporalUpdate_);
   gsp_->setgenerateMap(false);
   gsp_->GridSlamProcessor::init(particles_, xmin_, ymin_, xmax_, ymax_,
-                                delta_, initialPose);
+                                delta_, initialPose, map_trust_);
   gsp_->setllsamplerange(llsamplerange_);
   gsp_->setllsamplestep(llsamplestep_);
   /// @todo Check these calls; in the gmapping gui, they use
@@ -787,5 +906,22 @@ void SlamGMapping::publishTransform()
   map_to_odom_mutex_.lock();
   ros::Time tf_expiration = ros::Time::now() + ros::Duration(tf_delay_);
   tfB_->sendTransform( tf::StampedTransform (map_to_odom_, tf_expiration, map_frame_, odom_frame_));
+
+  geometry_msgs::PoseArray cloud_msg;
+  cloud_msg.header.stamp = ros::Time::now();
+  cloud_msg.header.frame_id = map_frame_;
+  cloud_msg.poses.reserve(gsp_->getParticles().size());
+  for(std::vector<GMapping::GridSlamProcessor::Particle>::const_iterator it = gsp_->getParticles().begin();
+      it != gsp_->getParticles().end();
+      ++it)
+    {
+      geometry_msgs::Pose pose;
+      tf::poseTFToMsg(tf::Pose(tf::createQuaternionFromYaw(it->pose.theta),
+                               tf::Vector3(it->pose.x, it->pose.y, 0)),
+                      pose);
+        cloud_msg.poses.push_back(pose);
+    }
+  particlecloud_pub_.publish(cloud_msg);
+
   map_to_odom_mutex_.unlock();
 }
