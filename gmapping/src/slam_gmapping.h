@@ -133,7 +133,7 @@ class SlamGMapping
     double lasamplestep_;
     
     // Prior map parameters
-    std::string yaml_;
+    std::string prior_map_yaml_;
     int map_trust_;
 
     ros::NodeHandle private_nh_;

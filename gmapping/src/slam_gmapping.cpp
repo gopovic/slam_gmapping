@@ -267,8 +267,8 @@ void SlamGMapping::init()
 
   // read map YAML (code from map_server)
 
-  if(!private_nh_.getParam("yaml", yaml_))
-    yaml_ = std::string();
+  if(!private_nh_.getParam("yaml", prior_map_yaml_))
+    prior_map_yaml_ = std::string();
 
   if(!private_nh_.getParam("map_trust", map_trust_))
     map_trust_ = 5;
@@ -281,11 +281,11 @@ void SlamGMapping::init()
   double origin[3];
   MapMode mode = TRINARY;
 
-  if (!yaml_.empty()) {
+  if (!prior_map_yaml_.empty()) {
 
-    std::ifstream fin(yaml_.c_str());
+    std::ifstream fin(prior_map_yaml_.c_str());
     if (fin.fail()) {
-      ROS_ERROR("Map_server could not open %s.", yaml_.c_str());
+      ROS_ERROR("Map_server could not open %s.", prior_map_yaml_.c_str());
       exit(-1);
     }
 
@@ -350,7 +350,7 @@ void SlamGMapping::init()
         exit(-1);
       }
       if (map_name[0] != '/') {
-        char *yaml_name = strdup(yaml_.c_str());
+        char *yaml_name = strdup(prior_map_yaml_.c_str());
         map_name = std::string(dirname(yaml_name)) + '/' + map_name;
         free(yaml_name);
       }
@@ -621,7 +621,7 @@ SlamGMapping::initMapper(const sensor_msgs::LaserScan& scan)
   /// @todo Expose setting an initial pose
   GMapping::OrientedPoint initialPose;
 
-  if (!yaml_.empty()) {
+  if (!prior_map_yaml_.empty()) {
     // load initial pose from gsp
     double pose[3];
     pose[0] = gsp_->origin[0];
