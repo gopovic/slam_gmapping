@@ -1,0 +1,25 @@
+<launch>
+
+        <param name="/use_sim_time" value="true" />
+
+	<node name="gmapping" pkg="gmapping" type="slam_gmapping">
+		<remap from="scan" to="pioneer/scan"/>
+		<param name="odom_frame" value="pioneer/odom"/>
+		<param name="base_frame" value="pioneer/base_link"/>
+		<param name="particles" value="60"/>
+		<param name="yaml" value="/path/to/the/yaml/CAD.yaml"/>
+		<param name="map_trust" value="10"/>
+		<param name="srr" value="0.1"/>
+		<param name="srt" value="0.2"/>
+		<param name="str" value="0.1"/>
+		<param name="stt" value="0.2"/>
+	</node>        
+	 
+	<node name="simulation" pkg="rosbag" type="play" args="-r 1 -s 30 /home/goran/catkin_ws/src/bags/aleja_bez_publishanja_mape.bag --clock"/>
+
+	<node name="rviz" pkg="rviz" type="rviz"/>
+
+		
+</launch>
+
+
